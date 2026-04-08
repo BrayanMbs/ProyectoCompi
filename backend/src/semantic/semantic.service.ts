@@ -239,7 +239,7 @@ export class SemanticService {
       return 'Real';
     }
 
-    const callMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)\((.*)\)$/);
+    const callMatch = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)\s*\((.*)\)$/);
     if (callMatch) {
       const functionInfo = functions.get(callMatch[1]);
       if (!functionInfo) {

@@ -4,16 +4,51 @@ import { SemanticService } from './semantic/semantic.service';
 import { TranslatorService } from './translator/translator.service';
 
 const codigo = `
-Algoritmo Test
+Algoritmo DemoComplejo
 Definir x Como Entero
+Definir limite Como Entero
+Definir acumulado Como Entero
 Definir mensaje Como Cadena
-x <- 10
-mensaje <- "Mayor"
-Si x > 5 Entonces
+Definir activo Como Logico
+
+x <- 1
+limite <- 3
+acumulado <- sumar(x, limite)
+mensaje <- "Inicio"
+activo <- Verdadero
+
+Mientras x < limite Hacer
+Escribir x
+x <- x + 1
+FinMientras
+
+Para x <- 1 Hasta 3 Hacer
+Escribir x
+FinPara
+
+Hacer
 Escribir mensaje
+activo <- Falso
+Mientras activo == Verdadero
+
+Segun acumulado Hacer
+Caso 4
+Escribir "Cuatro"
+Defecto
+Escribir "Otro"
+FinSegun
+
+Si acumulado >= 4 Entonces
+Escribir "Listo"
 Sino
-Escribir "Menor"
+Escribir "Pendiente"
 FinSi
+
+Funcion sumar(a Como Entero, b Como Entero) Como Entero
+Definir resultado Como Entero
+resultado <- a + b
+Retornar resultado
+FinFuncion
 FinAlgoritmo
 `;
 

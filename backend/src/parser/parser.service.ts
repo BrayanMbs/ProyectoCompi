@@ -97,6 +97,10 @@ export class ParserService {
         break;
       }
 
+      if (stopWords.includes('Mientras') && /^Mientras\s+.+$/.test(line.text)) {
+        break;
+      }
+
       if (
         regex.finSi.test(line.text) ||
         regex.finMientras.test(line.text) ||
