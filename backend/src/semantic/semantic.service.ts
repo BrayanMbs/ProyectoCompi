@@ -30,7 +30,10 @@ export class SemanticService {
         continue;
       }
 
-      const name = this.requireValue(node.name, `Funcion sin nombre en la linea ${node.line}`);
+      const name = this.requireValue(
+        node.name,
+        `Funcion sin nombre en la linea ${node.line}`,
+      );
       const returnType = (node.returnType ?? 'Vacio') as NebulaType;
       const params = (node.params ?? []).map((param) => ({
         name: param.name,
@@ -65,17 +68,36 @@ export class SemanticService {
           this.handleAssignment(node, scopes, functions);
           break;
         case 'PRINT':
-          this.ensureExpressionType(this.requireExpression(node), scopes, functions);
+          this.ensureExpressionType(
+            this.requireExpression(node),
+            scopes,
+            functions,
+          );
           break;
         case 'IF':
           this.ensureCondition(node, scopes, functions);
-          this.analyzeBlock(node.children || [], [...scopes, { variables: new Map() }], functions, returnType);
-          this.analyzeBlock(node.elseBranch || [], [...scopes, { variables: new Map() }], functions, returnType);
+          this.analyzeBlock(
+            node.children || [],
+            [...scopes, { variables: new Map() }],
+            functions,
+            returnType,
+          );
+          this.analyzeBlock(
+            node.elseBranch || [],
+            [...scopes, { variables: new Map() }],
+            functions,
+            returnType,
+          );
           break;
         case 'WHILE':
         case 'DO_WHILE':
           this.ensureCondition(node, scopes, functions);
-          this.analyzeBlock(node.children || [], [...scopes, { variables: new Map() }], functions, returnType);
+          this.analyzeBlock(
+            node.children || [],
+            [...scopes, { variables: new Map() }],
+            functions,
+            returnType,
+          );
           break;
         case 'FOR':
           this.handleFor(node, scopes, functions, returnType);
@@ -88,9 +110,17 @@ export class SemanticService {
           break;
         case 'RETURN':
           if (returnType === 'Vacio') {
-            throw new Error(`No se puede retornar un valor fuera de una funcion con retorno. Linea ${node.line}`);
+            throw new Error(
+              `No se puede retornar un valor fuera de una funcion con retorno. Linea ${node.line}`,
+            );
           }
-          this.ensureAssignable(returnType, this.requireExpression(node), scopes, functions, node.line);
+          this.ensureAssignable(
+            returnType,
+            this.requireExpression(node),
+            scopes,
+            functions,
+            node.line,
+          );
           break;
         default:
           throw new Error(`Nodo semantico no soportado: ${node.type}`);
@@ -99,8 +129,14 @@ export class SemanticService {
   }
 
   private handleDeclaration(node: ASTNode, scopes: Scope[]): void {
-    const name = this.requireValue(node.name, `Variable invalida en la linea ${node.line}`);
-    const dataType = this.requireValue(node.dataType, `Tipo invalido en la linea ${node.line}`) as NebulaType;
+    const name = this.requireValue(
+      node.name,
+      `Variable invalida en la linea ${node.line}`,
+    );
+    const dataType = this.requireValue(
+      node.dataType,
+      `Tipo invalido en la linea ${node.line}`,
+    ) as NebulaType;
     const currentScope = scopes[scopes.length - 1];
 
     if (currentScope.variables.has(name)) {
@@ -110,15 +146,28 @@ export class SemanticService {
     currentScope.variables.set(name, dataType);
   }
 
-  private handleAssignment(node: ASTNode, scopes: Scope[], functions: Map<string, FunctionInfo>): void {
-    const name = this.requireValue(node.name, `Asignacion invalida en la linea ${node.line}`);
+  private handleAssignment(
+    node: ASTNode,
+    scopes: Scope[],
+    functions: Map<string, FunctionInfo>,
+  ): void {
+    const name = this.requireValue(
+      node.name,
+      `Asignacion invalida en la linea ${node.line}`,
+    );
     const variableType = this.findVariableType(name, scopes);
 
     if (!variableType) {
       throw new Error(`Variable ${name} no declarada. Linea ${node.line}`);
     }
 
-    this.ensureAssignable(variableType, this.requireExpression(node), scopes, functions, node.line);
+    this.ensureAssignable(
+      variableType,
+      this.requireExpression(node),
+      scopes,
+      functions,
+      node.line,
+    );
   }
 
   private handleFor(
@@ -127,20 +176,44 @@ export class SemanticService {
     functions: Map<string, FunctionInfo>,
     returnType: NebulaType,
   ): void {
-    const variable = this.requireValue(node.name, `Variable de Para invalida en la linea ${node.line}`);
+    const variable = this.requireValue(
+      node.name,
+      `Variable de Para invalida en la linea ${node.line}`,
+    );
     const variableType = this.findVariableType(variable, scopes);
 
     if (!variableType) {
-      throw new Error(`La variable ${variable} debe declararse antes del Para. Linea ${node.line}`);
+      throw new Error(
+        `La variable ${variable} debe declararse antes del Para. Linea ${node.line}`,
+      );
     }
 
     if (variableType !== 'Entero' && variableType !== 'Real') {
-      throw new Error(`La variable ${variable} del Para debe ser numerica. Linea ${node.line}`);
+      throw new Error(
+        `La variable ${variable} del Para debe ser numerica. Linea ${node.line}`,
+      );
     }
 
-    this.ensureAssignable(variableType, this.requireValue(node.value, 'Inicio de Para invalido'), scopes, functions, node.line);
-    this.ensureAssignable(variableType, this.requireExpression(node), scopes, functions, node.line);
-    this.analyzeBlock(node.children || [], [...scopes, { variables: new Map() }], functions, returnType);
+    this.ensureAssignable(
+      variableType,
+      this.requireValue(node.value, 'Inicio de Para invalido'),
+      scopes,
+      functions,
+      node.line,
+    );
+    this.ensureAssignable(
+      variableType,
+      this.requireExpression(node),
+      scopes,
+      functions,
+      node.line,
+    );
+    this.analyzeBlock(
+      node.children || [],
+      [...scopes, { variables: new Map() }],
+      functions,
+      returnType,
+    );
   }
 
   private handleSwitch(
@@ -149,25 +222,52 @@ export class SemanticService {
     functions: Map<string, FunctionInfo>,
     returnType: NebulaType,
   ): void {
-    const controlType = this.ensureExpressionType(this.requireExpression(node), scopes, functions);
+    const controlType = this.ensureExpressionType(
+      this.requireExpression(node),
+      scopes,
+      functions,
+    );
 
     for (const caseNode of node.cases || []) {
-      const caseType = this.ensureExpressionType(this.requireExpression(caseNode), scopes, functions);
+      const caseType = this.ensureExpressionType(
+        this.requireExpression(caseNode),
+        scopes,
+        functions,
+      );
 
       if (caseType !== controlType) {
-        throw new Error(`El Caso de la linea ${caseNode.line} no coincide con el tipo del Segun`);
+        throw new Error(
+          `El Caso de la linea ${caseNode.line} no coincide con el tipo del Segun`,
+        );
       }
 
-      this.analyzeBlock(caseNode.children || [], [...scopes, { variables: new Map() }], functions, returnType);
+      this.analyzeBlock(
+        caseNode.children || [],
+        [...scopes, { variables: new Map() }],
+        functions,
+        returnType,
+      );
     }
 
     if (node.defaultCase) {
-      this.analyzeBlock(node.defaultCase.children || [], [...scopes, { variables: new Map() }], functions, returnType);
+      this.analyzeBlock(
+        node.defaultCase.children || [],
+        [...scopes, { variables: new Map() }],
+        functions,
+        returnType,
+      );
     }
   }
 
-  private handleFunction(node: ASTNode, scopes: Scope[], functions: Map<string, FunctionInfo>): void {
-    const name = this.requireValue(node.name, `Funcion sin nombre en la linea ${node.line}`);
+  private handleFunction(
+    node: ASTNode,
+    scopes: Scope[],
+    functions: Map<string, FunctionInfo>,
+  ): void {
+    const name = this.requireValue(
+      node.name,
+      `Funcion sin nombre en la linea ${node.line}`,
+    );
     const functionInfo = functions.get(name);
 
     if (!functionInfo) {
@@ -177,26 +277,47 @@ export class SemanticService {
     const functionScope: Scope = { variables: new Map() };
     for (const param of functionInfo.params) {
       if (functionScope.variables.has(param.name)) {
-        throw new Error(`Parametro duplicado ${param.name} en la funcion ${name}`);
+        throw new Error(
+          `Parametro duplicado ${param.name} en la funcion ${name}`,
+        );
       }
       functionScope.variables.set(param.name, param.dataType);
     }
 
-    this.analyzeBlock(node.children || [], [...scopes, functionScope], functions, functionInfo.returnType);
+    this.analyzeBlock(
+      node.children || [],
+      [...scopes, functionScope],
+      functions,
+      functionInfo.returnType,
+    );
   }
 
-  private ensureCondition(node: ASTNode, scopes: Scope[], functions: Map<string, FunctionInfo>): void {
+  private ensureCondition(
+    node: ASTNode,
+    scopes: Scope[],
+    functions: Map<string, FunctionInfo>,
+  ): void {
     const condition = node.condition;
 
     if (!condition) {
       throw new Error(`Condicion invalida en la linea ${node.line}`);
     }
 
-    const leftType = this.ensureExpressionType(condition.left, scopes, functions);
-    const rightType = this.ensureExpressionType(condition.right, scopes, functions);
+    const leftType = this.ensureExpressionType(
+      condition.left,
+      scopes,
+      functions,
+    );
+    const rightType = this.ensureExpressionType(
+      condition.right,
+      scopes,
+      functions,
+    );
 
     if (leftType !== rightType && !this.isNumeric(leftType, rightType)) {
-      throw new Error(`Tipos incompatibles en la condicion de la linea ${node.line}`);
+      throw new Error(
+        `Tipos incompatibles en la condicion de la linea ${node.line}`,
+      );
     }
   }
 
@@ -207,7 +328,11 @@ export class SemanticService {
     functions: Map<string, FunctionInfo>,
     line?: number,
   ): void {
-    const expressionType = this.ensureExpressionType(expression, scopes, functions);
+    const expressionType = this.ensureExpressionType(
+      expression,
+      scopes,
+      functions,
+    );
 
     if (expectedType === expressionType) {
       return;
@@ -217,10 +342,16 @@ export class SemanticService {
       return;
     }
 
-    throw new Error(`Tipo incompatible en la linea ${line}. Se esperaba ${expectedType} pero se obtuvo ${expressionType}`);
+    throw new Error(
+      `Tipo incompatible en la linea ${line}. Se esperaba ${expectedType} pero se obtuvo ${expressionType}`,
+    );
   }
 
-  private ensureExpressionType(expression: string, scopes: Scope[], functions: Map<string, FunctionInfo>): NebulaType {
+  private ensureExpressionType(
+    expression: string,
+    scopes: Scope[],
+    functions: Map<string, FunctionInfo>,
+  ): NebulaType {
     const trimmed = expression.trim();
 
     if (/^".*"$/.test(trimmed)) {
@@ -256,7 +387,12 @@ export class SemanticService {
       }
 
       args.forEach((arg, index) => {
-        this.ensureAssignable(functionInfo.params[index].dataType, arg, scopes, functions);
+        this.ensureAssignable(
+          functionInfo.params[index].dataType,
+          arg,
+          scopes,
+          functions,
+        );
       });
 
       return functionInfo.returnType;
@@ -273,7 +409,9 @@ export class SemanticService {
     const arithmeticParts = trimmed
       .split(/(\+|-|\*|\/)/)
       .map((part) => part.trim())
-      .filter((part) => part.length > 0 && !['+', '-', '*', '/'].includes(part));
+      .filter(
+        (part) => part.length > 0 && !['+', '-', '*', '/'].includes(part),
+      );
 
     if (arithmeticParts.length > 1) {
       let result: NebulaType = 'Entero';
@@ -294,7 +432,10 @@ export class SemanticService {
     throw new Error(`Expresion invalida: ${expression}`);
   }
 
-  private findVariableType(name: string, scopes: Scope[]): NebulaType | undefined {
+  private findVariableType(
+    name: string,
+    scopes: Scope[],
+  ): NebulaType | undefined {
     for (let index = scopes.length - 1; index >= 0; index--) {
       const type = scopes[index].variables.get(name);
       if (type) {
@@ -306,7 +447,8 @@ export class SemanticService {
   }
 
   private isNumeric(left: NebulaType, right: NebulaType): boolean {
-    return ['Entero', 'Real'].includes(left) && ['Entero', 'Real'].includes(right);
+    const numericTypes: NebulaType[] = ['Entero', 'Real'];
+    return numericTypes.includes(left) && numericTypes.includes(right);
   }
 
   private requireValue(value: string | undefined, message: string): string {
@@ -318,6 +460,9 @@ export class SemanticService {
   }
 
   private requireExpression(node: ASTNode): string {
-    return this.requireValue(node.expression, `Expresion invalida en la linea ${node.line}`);
+    return this.requireValue(
+      node.expression,
+      `Expresion invalida en la linea ${node.line}`,
+    );
   }
 }

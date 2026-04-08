@@ -20,7 +20,20 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer())
       .get('/')
       .expect(200)
-      .expect('Hello World!');
+      .expect('NEBULA compiler backend running');
+  });
+
+  it('/compiler/compile (POST)', () => {
+    return request(app.getHttpServer())
+      .post('/compiler/compile')
+      .send({
+        code: 'Algoritmo Demo\nDefinir x Como Entero\nx <- 10\nEscribir x\nFinAlgoritmo',
+      })
+      .expect(201)
+      .expect((response) => {
+        expect(response.body.ok).toBe(true);
+        expect(response.body.java).toContain('public class Demo');
+      });
   });
 
   afterEach(async () => {
