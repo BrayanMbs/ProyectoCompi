@@ -1,9 +1,35 @@
 export const regex = {
   identificador: /^[a-zA-Z][a-zA-Z0-9]*$/,
-  numero: /^\d+$/,
-  cadena: /^".*?"$/,
+  numero: /^\d+(\.\d+)?$/,
+  cadena: /^"([^"\\]|\\.)*"$/,
+  booleano: /^(Verdadero|Falso)$/,
   operadorRelacional: /^(==|!=|<=|>=|<|>)$/,
   asignacion: /^<-$/,
+  lineaPrograma: /^Algoritmo\s+[a-zA-Z][a-zA-Z0-9]*$/,
+  finPrograma: /^FinAlgoritmo$/,
+  declaracion:
+    /^Definir\s+[a-zA-Z][a-zA-Z0-9]*\s+Como\s+(Entero|Real|Cadena|Logico)$/,
+  asignacionLinea:
+    /^[a-zA-Z][a-zA-Z0-9]*\s*<-\s*(".+?"|\d+(\.\d+)?|Verdadero|Falso|[a-zA-Z][a-zA-Z0-9]*|\(.+\)|.+)$/,
+  escribir: /^Escribir\s+(.+)$/,
+  condicion:
+    /^([a-zA-Z][a-zA-Z0-9]*|\d+(\.\d+)?|Verdadero|Falso|".+?")\s*(==|!=|<=|>=|<|>)\s*([a-zA-Z][a-zA-Z0-9]*|\d+(\.\d+)?|Verdadero|Falso|".+?")$/,
+  si: /^Si\s+(.+)\s+Entonces$/,
+  sino: /^Sino$/,
+  finSi: /^FinSi$/,
+  mientras: /^Mientras\s+(.+)\s+Hacer$/,
+  hacer: /^Hacer$/,
+  finMientras: /^FinMientras$/,
+  para: /^Para\s+([a-zA-Z][a-zA-Z0-9]*)\s*<-\s*(.+)\s+Hasta\s+(.+)\s+Hacer$/,
+  finPara: /^FinPara$/,
+  switchInicio: /^Segun\s+(.+)\s+Hacer$/,
+  caso: /^Caso\s+(.+)$/,
+  defecto: /^Defecto$/,
+  finSegun: /^FinSegun$/,
+  funcion:
+    /^Funcion\s+([a-zA-Z][a-zA-Z0-9]*)\s*\((.*)\)\s+Como\s+(Entero|Real|Cadena|Logico|Vacio)$/,
+  finFuncion: /^FinFuncion$/,
+  retornar: /^Retornar\s+(.+)$/,
 };
 
 export const palabrasReservadas = [
@@ -22,4 +48,13 @@ export const palabrasReservadas = [
   'Hasta',
   'FinPara',
   'Escribir',
+  'Segun',
+  'Caso',
+  'Defecto',
+  'FinSegun',
+  'Funcion',
+  'FinFuncion',
+  'Retornar',
 ];
+
+export const tiposDato = ['Entero', 'Real', 'Cadena', 'Logico', 'Vacio'];
