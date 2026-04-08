@@ -2,10 +2,9 @@ import { ASTNode } from '../parser/ast';
 
 export class TranslatorService {
   private getValue(node?: ASTNode): string {
-    if (!node?.value) {
-      throw new Error('Token invalido o incompleto');
+    if (!node || !node.value) {
+      throw new Error('Token inválido o incompleto');
     }
-
     return node.value;
   }
 
@@ -15,8 +14,7 @@ public class Main {
   public static void main(String[] args) {
 `;
 
-    const variables = new Map<string, string>(); // nombre → tipo
-
+    const variables = new Map<string, string>();
     const nodes = ast.children || [];
 
     for (let i = 0; i < nodes.length; i++) {
@@ -24,12 +22,8 @@ public class Main {
 
       // 🔥 DECLARACIÓN
       if (node.value === 'Definir') {
-        const nombre = nodes[i + 1]?.value;
-        const tipo = nodes[i + 3]?.value;
-
-        if (!nombre || !tipo) {
-          throw new Error('Error en declaración de variable');
-        }
+        const nombre = this.getValue(nodes[i + 1]);
+        const tipo = this.getValue(nodes[i + 3]);
 
         if (variables.has(nombre)) {
           throw new Error(`Variable ${nombre} ya declarada`);
@@ -48,7 +42,7 @@ public class Main {
 
       // 🔥 ASIGNACIÓN
       if (node.type === 'IDENTIFICADOR' && nodes[i + 1]?.value === '<-') {
-        const nombre = this.getValue(node);
+        const nombre = node.value;
         const valor = this.getValue(nodes[i + 2]);
 
         if (!variables.has(nombre)) {
@@ -60,18 +54,16 @@ public class Main {
 
       // 🔥 ESCRIBIR
       if (node.value === 'Escribir') {
-        const valor = nodes[i + 1]?.value;
-
-        if (!valor) throw new Error('Escribir sin valor');
+        const valor = this.getValue(nodes[i + 1]);
 
         java += `System.out.println(${valor});\n`;
       }
 
       // 🔥 IF
       if (node.value === 'Si') {
-        const izq = nodes[i + 1]?.value;
-        const op = nodes[i + 2]?.value;
-        const der = nodes[i + 3]?.value;
+        const izq = this.getValue(nodes[i + 1]);
+        const op = this.getValue(nodes[i + 2]);
+        const der = this.getValue(nodes[i + 3]);
 
         java += `if (${izq} ${op} ${der}) {\n`;
       }
@@ -86,9 +78,9 @@ public class Main {
 
       // 🔥 WHILE
       if (node.value === 'Mientras') {
-        const izq = nodes[i + 1]?.value;
-        const op = nodes[i + 2]?.value;
-        const der = nodes[i + 3]?.value;
+        const izq = this.getValue(nodes[i + 1]);
+        const op = this.getValue(nodes[i + 2]);
+        const der = this.getValue(nodes[i + 3]);
 
         java += `while (${izq} ${op} ${der}) {\n`;
       }
@@ -99,13 +91,9 @@ public class Main {
 
       // 🔥 FOR
       if (node.value === 'Para') {
-        const variable = nodes[i + 1]?.value;
-        const inicio = nodes[i + 3]?.value;
-        const fin = nodes[i + 5]?.value;
-
-        if (!variable || !inicio || !fin) {
-          throw new Error('Error en estructura Para');
-        }
+        const variable = this.getValue(nodes[i + 1]);
+        const inicio = this.getValue(nodes[i + 3]);
+        const fin = this.getValue(nodes[i + 5]);
 
         java += `for (int ${variable} = ${inicio}; ${variable} <= ${fin}; ${variable}++) {\n`;
       }

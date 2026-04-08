@@ -1,5 +1,5 @@
 export interface ASTNode {
   type: string;
-  value?: string;
+  value: string;
   children?: ASTNode[];
 }

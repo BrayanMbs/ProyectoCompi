@@ -1,30 +1,44 @@
-import { LexerService } from './lexer/lexer.service';
-import { ParserService } from './parser/parser.service';
-import { TranslatorService } from './translator/translator.service';
+import { LexerService } from '../src/lexer/lexer.service';
+import { ParserService } from '../src/parser/parser.service';
+import { SemanticService } from '../src/semantic/semantic.service';
+import { TranslatorService } from '../src/translator/translator.service';
 
-const lexer = new LexerService();
-const parser = new ParserService();
-const translator = new TranslatorService();
-
-const code = `
-Algoritmo Prueba
-Definir edad Como Entero
-edad <- 20
-Si edad > 18 Entonces
-Escribir "Mayor"
-FinSi
+const codigo = `
+Algoritmo Test
+x <- 10
 FinAlgoritmo
 `;
 
 try {
-  const tokens = lexer.analizar(code);
-  console.log('TOKENS:', tokens);
+  const lexer = new LexerService();
+  const parser = new ParserService();
+  const semantic = new SemanticService();
+  const translator = new TranslatorService();
 
+  // 🔥 1. LEXER
+  const tokens = lexer.analizar(codigo);
+  console.log('\n=== TOKENS ===');
+  console.log(tokens);
+
+  // 🔥 2. PARSER
   const ast = parser.parse(tokens);
-  console.log('AST:', ast);
+  console.log('\n=== AST ===');
+  console.log(JSON.stringify(ast, null, 2));
 
+  // 🔥 3. SEMÁNTICO
+  semantic.analyze(ast);
+  console.log('\n=== SEMÁNTICO ===');
+  console.log('✔ Sin errores');
+
+  // 🔥 4. TRADUCTOR
   const java = translator.traducir(ast);
-  console.log('JAVA:\n', java);
+  console.log('\n=== JAVA GENERADO ===');
+  console.log(java);
 } catch (error) {
-  console.error('ERROR:', error);
+  console.error('\n❌ ERROR:');
+  if (error instanceof Error) {
+    console.error(error.message);
+  } else {
+    console.error(error);
+  }
 }
