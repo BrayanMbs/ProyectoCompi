@@ -9,4 +9,9 @@ export class CompilerController {
   compile(@Body('code') code: string) {
     return this.compilerService.compile(code);
   }
+
+  @Post('run-java')
+  runJava(@Body('java') java: string) {
+    return this.compilerService.runJava(java);
+  }
 }
