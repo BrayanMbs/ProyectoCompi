@@ -89,22 +89,16 @@ export class ParserService {
         break;
       }
 
-      if (stopWords.includes(line.text)) {
-        break;
-      }
-
-      if (line.text === 'Sino' && stopWords.includes('Sino')) {
-        break;
-      }
-
-      if (stopWords.includes('Mientras') && /^Mientras\s+.+$/.test(line.text)) {
+      if (this.isStopLine(line.text, stopWords)) {
         break;
       }
 
       if (
         regex.finSi.test(line.text) ||
         regex.finMientras.test(line.text) ||
-        regex.finPara.test(line.text)
+        regex.finPara.test(line.text) ||
+        regex.finSegun.test(line.text) ||
+        regex.finFuncion.test(line.text)
       ) {
         throw new Error(`Cierre inesperado en la linea ${line.line}`);
       }
@@ -488,5 +482,21 @@ export class ParserService {
 
   private currentLine(): LineInfo | undefined {
     return this.lines[this.index];
+  }
+
+  private isStopLine(text: string, stopWords: string[]): boolean {
+    if (stopWords.includes(text)) {
+      return true;
+    }
+
+    if (stopWords.includes('Caso') && regex.caso.test(text)) {
+      return true;
+    }
+
+    if (stopWords.includes('Mientras') && /^Mientras\s+.+$/.test(text)) {
+      return true;
+    }
+
+    return false;
   }
 }

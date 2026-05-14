@@ -53,4 +53,36 @@ FinAlgoritmo
 
     expect(() => semantic.analyze(ast)).toThrow('Variable x no declarada');
   });
+
+  it('reconoce bloques Segun con varios casos y defecto', () => {
+    const codigo = `
+Algoritmo MenuDemo
+Definir opcion Como Entero
+opcion <- 2
+Segun opcion Hacer
+Caso 1
+Escribir "Crear"
+Caso 2
+Escribir "Editar"
+Defecto
+Escribir "Salir"
+FinSegun
+FinAlgoritmo
+`;
+
+    const lexer = new LexerService();
+    const parser = new ParserService();
+    const semantic = new SemanticService();
+    const translator = new TranslatorService();
+
+    const ast = parser.parse(lexer.analizar(codigo));
+
+    expect(() => semantic.analyze(ast)).not.toThrow();
+
+    const java = translator.traducir(ast);
+    expect(java).toContain('switch (opcion)');
+    expect(java).toContain('case 1:');
+    expect(java).toContain('case 2:');
+    expect(java).toContain('default:');
+  });
 });
