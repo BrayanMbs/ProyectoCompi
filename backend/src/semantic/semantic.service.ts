@@ -72,6 +72,7 @@ export class SemanticService {
             this.requireExpression(node),
             scopes,
             functions,
+            node.line,
           );
           break;
         case 'IF':
@@ -226,6 +227,7 @@ export class SemanticService {
       this.requireExpression(node),
       scopes,
       functions,
+      node.line,
     );
 
     for (const caseNode of node.cases || []) {
@@ -233,6 +235,7 @@ export class SemanticService {
         this.requireExpression(caseNode),
         scopes,
         functions,
+        caseNode.line,
       );
 
       if (caseType !== controlType) {
@@ -307,11 +310,13 @@ export class SemanticService {
       condition.left,
       scopes,
       functions,
+      node.line,
     );
     const rightType = this.ensureExpressionType(
       condition.right,
       scopes,
       functions,
+      node.line,
     );
 
     if (leftType !== rightType && !this.isNumeric(leftType, rightType)) {
@@ -332,6 +337,7 @@ export class SemanticService {
       expression,
       scopes,
       functions,
+      line,
     );
 
     if (expectedType === expressionType) {
@@ -351,6 +357,7 @@ export class SemanticService {
     expression: string,
     scopes: Scope[],
     functions: Map<string, FunctionInfo>,
+    line?: number,
   ): NebulaType {
     const trimmed = expression.trim();
 
@@ -374,7 +381,7 @@ export class SemanticService {
     if (callMatch) {
       const functionInfo = functions.get(callMatch[1]);
       if (!functionInfo) {
-        throw new Error(`La funcion ${callMatch[1]} no existe`);
+        throw new Error(`La funcion ${callMatch[1]} no existe. Linea ${line}`);
       }
 
       const args = callMatch[2]
@@ -383,7 +390,9 @@ export class SemanticService {
         .filter((arg) => arg.length > 0);
 
       if (args.length !== functionInfo.params.length) {
-        throw new Error(`Cantidad invalida de argumentos para ${callMatch[1]}`);
+        throw new Error(
+          `Cantidad invalida de argumentos para ${callMatch[1]}. Linea ${line}`,
+        );
       }
 
       args.forEach((arg, index) => {
@@ -392,6 +401,7 @@ export class SemanticService {
           arg,
           scopes,
           functions,
+          line,
         );
       });
 
@@ -401,7 +411,7 @@ export class SemanticService {
     if (/^[a-zA-Z][a-zA-Z0-9]*$/.test(trimmed)) {
       const variableType = this.findVariableType(trimmed, scopes);
       if (!variableType) {
-        throw new Error(`Variable ${trimmed} no declarada`);
+        throw new Error(`Variable ${trimmed} no declarada. Linea ${line}`);
       }
       return variableType;
     }
@@ -417,9 +427,9 @@ export class SemanticService {
       let result: NebulaType = 'Entero';
 
       for (const part of arithmeticParts) {
-        const partType = this.ensureExpressionType(part, scopes, functions);
+        const partType = this.ensureExpressionType(part, scopes, functions, line);
         if (partType !== 'Entero' && partType !== 'Real') {
-          throw new Error(`Operacion invalida con tipo ${partType}`);
+          throw new Error(`Operacion invalida con tipo ${partType}. Linea ${line}`);
         }
         if (partType === 'Real') {
           result = 'Real';
@@ -429,7 +439,7 @@ export class SemanticService {
       return result;
     }
 
-    throw new Error(`Expresion invalida: ${expression}`);
+    throw new Error(`Expresion invalida en la linea ${line}: ${expression}`);
   }
 
   private findVariableType(

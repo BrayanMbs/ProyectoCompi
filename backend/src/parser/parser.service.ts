@@ -93,6 +93,10 @@ export class ParserService {
         break;
       }
 
+      if (line.text === 'FinAlgoritmo') {
+        break;
+      }
+
       if (
         regex.finSi.test(line.text) ||
         regex.finMientras.test(line.text) ||
