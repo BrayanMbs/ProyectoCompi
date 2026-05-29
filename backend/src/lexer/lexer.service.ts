@@ -23,6 +23,7 @@ export class LexerService {
         const stringMatch = fragment.match(/^"([^"\\]|\\.)*"/);
         const assignmentMatch = fragment.match(/^<-/);
         const relationalMatch = fragment.match(/^(==|!=|<=|>=|<|>)/);
+        const arithmeticMatch = fragment.match(/^(\+|-|\*|\/)/);
         const numberMatch = fragment.match(/^\d+(\.\d+)?/);
         const identifierMatch = fragment.match(/^[a-zA-Z][a-zA-Z0-9]*/);
 
@@ -56,6 +57,17 @@ export class LexerService {
             column,
           });
           cursor += relationalMatch[0].length;
+          continue;
+        }
+
+        if (arithmeticMatch) {
+          tokens.push({
+            type: TokenType.OPERADOR_ARITMETICO,
+            value: arithmeticMatch[0],
+            line: lineNumber,
+            column,
+          });
+          cursor += arithmeticMatch[0].length;
           continue;
         }
 

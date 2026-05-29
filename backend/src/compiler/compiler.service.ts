@@ -6,7 +6,10 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { LexerService } from '../lexer/lexer.service';
+import { Token } from '../lexer/token.interface';
 import { ParserService } from '../parser/parser.service';
+import { ASTNode } from '../parser/ast';
+import { regex } from '../lexer/regex';
 import { SemanticService } from '../semantic/semantic.service';
 import { TranslatorService } from '../translator/translator.service';
 
@@ -17,6 +20,7 @@ export interface CompileResult {
   tokens?: ReturnType<LexerService['analizar']>;
   ast?: ReturnType<ParserService['parse']>;
   symbolTable?: SymbolTableEntry[];
+  diagnostics?: Diagnostic[];
   java?: string;
   error?: string;
   errorLine?: number;
@@ -32,6 +36,24 @@ export interface RunJavaResult {
 }
 
 type CompileStage = 'Lexico' | 'Sintactico' | 'Semantico' | 'Traduccion';
+type DiagnosticSeverity = 'error' | 'warning' | 'info';
+
+interface BlockFrame {
+  kind: 'PROGRAM' | 'IF' | 'WHILE' | 'FOR' | 'SWITCH' | 'FUNCTION' | 'DO_WHILE';
+  line: number;
+  expected: string;
+}
+
+export interface Diagnostic {
+  severity: DiagnosticSeverity;
+  stage: CompileStage;
+  line: number;
+  column: number;
+  endColumn?: number;
+  message: string;
+  suggestion: string;
+  source?: string;
+}
 
 export interface SymbolTableEntry {
   nombre: string;
@@ -50,12 +72,17 @@ export class CompilerService {
 
   compile(code: string): CompileResult {
     let stage: CompileStage = 'Lexico';
+    let tokens: Token[] = [];
+    let ast: ASTNode | undefined;
+    const diagnostics = this.collectDiagnostics(code);
+    const recoveredAst = this.buildRecoveredAst(code);
+    const symbolTable = this.buildSymbolTableFromSource(code);
 
     try {
-      const tokens = this.lexer.analizar(code);
+      tokens = this.lexer.analizar(code);
       stage = 'Sintactico';
-      const ast = this.parser.parse(tokens);
-      const symbolTable = this.buildSymbolTable(ast);
+      ast = this.parser.parse(tokens);
+      const parsedSymbolTable = this.buildSymbolTable(ast);
       stage = 'Semantico';
       this.semantic.analyze(ast);
       stage = 'Traduccion';
@@ -65,11 +92,14 @@ export class CompilerService {
         ok: true,
         tokens,
         ast,
-        symbolTable,
+        symbolTable: parsedSymbolTable,
+        diagnostics,
         java,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Error desconocido';
+      const fallbackDiagnostic = this.errorToDiagnostic(message, stage, code);
+      const allDiagnostics = this.mergeDiagnostics(diagnostics, fallbackDiagnostic);
 
       return {
         ok: false,
@@ -77,8 +107,633 @@ export class CompilerService {
         errorLine: this.extractErrorLine(message),
         errorType: stage,
         suggestion: this.buildSuggestion(message, stage),
+        tokens,
+        ast: ast ?? recoveredAst,
+        symbolTable,
+        diagnostics: allDiagnostics,
       };
     }
+  }
+
+  private collectDiagnostics(code: string): Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+    const tokens = this.lexer.analizar(code);
+    const lines = code.replace(/\r/g, '').split('\n');
+    const declarations = new Map<string, { type: string; line: number; column: number }>();
+    const functions = new Map<string, { returnType: string; line: number; column: number; params: Array<{ name: string; dataType: string }> }>();
+    const blockStack: BlockFrame[] = [];
+    let currentFunctionReturn: string | null = null;
+
+    for (const token of tokens) {
+      if (token.type === 'DESCONOCIDO') {
+        this.pushDiagnostic(diagnostics, {
+          severity: 'error',
+          stage: 'Lexico',
+          line: token.line,
+          column: token.column,
+          endColumn: token.column + token.value.length,
+          message: `Caracter no reconocido "${token.value}".`,
+          suggestion: 'Elimina el caracter o reemplazalo por un simbolo valido del lenguaje NEBULA.',
+          source: lines[token.line - 1]?.trim(),
+        });
+      }
+    }
+
+    lines.forEach((rawLine, index) => {
+      const line = rawLine.trim();
+      const lineNumber = index + 1;
+      const column = rawLine.search(/\S/) + 1 || 1;
+
+      if (!line) {
+        return;
+      }
+
+      if (lineNumber === 1 && !regex.lineaPrograma.test(line)) {
+        this.pushDiagnostic(diagnostics, {
+          severity: 'error',
+          stage: 'Sintactico',
+          line: lineNumber,
+          column,
+          message: 'Se esperaba "Algoritmo Nombre".',
+          suggestion: 'Agregue una linea inicial como: Algoritmo MiPrograma.',
+          source: line,
+        });
+      }
+
+      if (regex.lineaPrograma.test(line)) {
+        blockStack.push({ kind: 'PROGRAM', line: lineNumber, expected: 'FinAlgoritmo' });
+        return;
+      }
+
+      if (regex.declaracion.test(line)) {
+        const match = line.match(/^Definir\s+([a-zA-Z][a-zA-Z0-9]*)\s+Como\s+(Entero|Real|Cadena|Logico)$/);
+        const name = match?.[1];
+        if (name) {
+          if (declarations.has(name)) {
+            const previous = declarations.get(name);
+            this.pushDiagnostic(diagnostics, {
+              severity: 'error',
+              stage: 'Semantico',
+              line: lineNumber,
+              column: rawLine.indexOf(name) + 1,
+              endColumn: rawLine.indexOf(name) + name.length + 1,
+              message: `Variable "${name}" ya declarada.`,
+              suggestion: `Cambie el nombre o elimine esta declaracion duplicada. Primera declaracion en linea ${previous?.line}.`,
+              source: line,
+            });
+          } else {
+            declarations.set(name, {
+              type: match[2],
+              line: lineNumber,
+              column: rawLine.indexOf(name) + 1,
+            });
+          }
+        }
+        return;
+      }
+
+      if (line.startsWith('Definir')) {
+        this.pushDiagnostic(diagnostics, {
+          severity: 'error',
+          stage: 'Sintactico',
+          line: lineNumber,
+          column,
+          message: 'Declaracion invalida.',
+          suggestion: 'Use el formato: Definir nombre Como Tipo.',
+          source: line,
+        });
+        return;
+      }
+
+      if (regex.funcion.test(line)) {
+        const functionInfo = this.parseFunctionHeader(line);
+        if (functionInfo) {
+          if (functions.has(functionInfo.name)) {
+            this.pushDiagnostic(diagnostics, {
+              severity: 'error',
+              stage: 'Semantico',
+              line: lineNumber,
+              column: rawLine.indexOf(functionInfo.name) + 1,
+              message: `Funcion "${functionInfo.name}" ya declarada.`,
+              suggestion: 'Cambie el nombre de la funcion o elimine la declaracion duplicada.',
+              source: line,
+            });
+          }
+          functions.set(functionInfo.name, {
+            returnType: functionInfo.returnType,
+            line: lineNumber,
+            column: rawLine.indexOf(functionInfo.name) + 1,
+            params: functionInfo.params,
+          });
+
+          for (const param of functionInfo.params) {
+            declarations.set(param.name, {
+              type: param.dataType,
+              line: lineNumber,
+              column: rawLine.indexOf(param.name) + 1,
+            });
+          }
+
+          currentFunctionReturn = functionInfo.returnType;
+          blockStack.push({ kind: 'FUNCTION', line: lineNumber, expected: 'FinFuncion' });
+        }
+        return;
+      }
+
+      if (line.startsWith('Funcion')) {
+        this.pushDiagnostic(diagnostics, {
+          severity: 'error',
+          stage: 'Sintactico',
+          line: lineNumber,
+          column,
+          message: 'Declaracion de funcion invalida.',
+          suggestion: 'Use: Funcion Nombre(param Como Tipo) Como Tipo.',
+          source: line,
+        });
+        return;
+      }
+
+      if (/^Si\b/.test(line)) {
+        if (!/\bEntonces$/.test(line)) {
+          this.pushDiagnostic(diagnostics, {
+            severity: 'error',
+            stage: 'Sintactico',
+            line: lineNumber,
+            column: rawLine.length + 1,
+            message: 'Se esperaba "Entonces".',
+            suggestion: 'Agregue la palabra reservada "Entonces" despues de la condicion.',
+            source: line,
+          });
+        } else if (!regex.si.test(line)) {
+          this.pushDiagnostic(diagnostics, {
+            severity: 'error',
+            stage: 'Sintactico',
+            line: lineNumber,
+            column,
+            message: 'Condicion invalida en estructura Si.',
+            suggestion: 'Use una condicion como: Si edad >= 18 Entonces.',
+            source: line,
+          });
+        }
+        blockStack.push({ kind: 'IF', line: lineNumber, expected: 'FinSi' });
+        return;
+      }
+
+      if (/^Mientras\b/.test(line)) {
+        const top = blockStack[blockStack.length - 1];
+        if (top?.kind === 'DO_WHILE' && regex.condicion.test(line.replace(/^Mientras\s+/, ''))) {
+          blockStack.pop();
+          return;
+        }
+
+        if (!/\bHacer$/.test(line)) {
+          this.pushDiagnostic(diagnostics, {
+            severity: 'error',
+            stage: 'Sintactico',
+            line: lineNumber,
+            column: rawLine.length + 1,
+            message: 'Se esperaba "Hacer".',
+            suggestion: 'Agregue "Hacer" al final del ciclo Mientras.',
+            source: line,
+          });
+        } else if (!regex.mientras.test(line)) {
+          this.pushDiagnostic(diagnostics, {
+            severity: 'error',
+            stage: 'Sintactico',
+            line: lineNumber,
+            column,
+            message: 'Condicion invalida en ciclo Mientras.',
+            suggestion: 'Use una condicion como: Mientras i < 10 Hacer.',
+            source: line,
+          });
+        }
+        blockStack.push({ kind: 'WHILE', line: lineNumber, expected: 'FinMientras' });
+        return;
+      }
+
+      if (/^Para\b/.test(line)) {
+        if (!regex.para.test(line)) {
+          this.pushDiagnostic(diagnostics, {
+            severity: 'error',
+            stage: 'Sintactico',
+            line: lineNumber,
+            column,
+            message: 'Estructura Para invalida.',
+            suggestion: 'Use: Para i <- inicio Hasta fin Hacer.',
+            source: line,
+          });
+        }
+        const loopVar = line.match(/^Para\s+([a-zA-Z][a-zA-Z0-9]*)/)?.[1];
+        if (loopVar && !declarations.has(loopVar)) {
+          this.pushDiagnostic(diagnostics, {
+            severity: 'error',
+            stage: 'Semantico',
+            line: lineNumber,
+            column: rawLine.indexOf(loopVar) + 1,
+            message: `Variable "${loopVar}" no declarada.`,
+            suggestion: `Declare la variable antes del ciclo: Definir ${loopVar} Como Entero.`,
+            source: line,
+          });
+        }
+        blockStack.push({ kind: 'FOR', line: lineNumber, expected: 'FinPara' });
+        return;
+      }
+
+      if (/^Segun\b/.test(line)) {
+        if (!regex.switchInicio.test(line)) {
+          this.pushDiagnostic(diagnostics, {
+            severity: 'error',
+            stage: 'Sintactico',
+            line: lineNumber,
+            column,
+            message: 'Estructura Segun invalida.',
+            suggestion: 'Use: Segun opcion Hacer.',
+            source: line,
+          });
+        }
+        blockStack.push({ kind: 'SWITCH', line: lineNumber, expected: 'FinSegun' });
+        return;
+      }
+
+      if (line === 'Hacer') {
+        blockStack.push({ kind: 'DO_WHILE', line: lineNumber, expected: 'Mientras condicion' });
+        return;
+      }
+
+      if (['FinSi', 'FinMientras', 'FinPara', 'FinSegun', 'FinFuncion', 'FinAlgoritmo'].includes(line)) {
+        this.closeBlock(blockStack, line, lineNumber, column, diagnostics, line);
+        if (line === 'FinFuncion') {
+          currentFunctionReturn = null;
+        }
+        return;
+      }
+
+      if (line === 'Sino' || regex.caso.test(line) || line === 'Defecto') {
+        return;
+      }
+
+      if (regex.asignacionLinea.test(line)) {
+        this.validateAssignment(line, rawLine, lineNumber, declarations, functions, diagnostics);
+        return;
+      }
+
+      if (regex.escribir.test(line)) {
+        const expression = line.replace(/^Escribir\s+/, '').trim();
+        this.inferExpressionType(expression, declarations, functions, lineNumber, diagnostics);
+        return;
+      }
+
+      if (regex.retornar.test(line)) {
+        const expression = line.replace(/^Retornar\s+/, '').trim();
+        if (!currentFunctionReturn || currentFunctionReturn === 'Vacio') {
+          this.pushDiagnostic(diagnostics, {
+            severity: 'error',
+            stage: 'Semantico',
+            line: lineNumber,
+            column,
+            message: 'Retorno incorrecto.',
+            suggestion: 'Use Retornar solo dentro de una funcion con tipo de retorno distinto de Vacio.',
+            source: line,
+          });
+        } else {
+          const expressionType = this.inferExpressionType(expression, declarations, functions, lineNumber, diagnostics);
+          if (expressionType && !this.isAssignable(currentFunctionReturn, expressionType)) {
+            this.pushDiagnostic(diagnostics, {
+              severity: 'error',
+              stage: 'Semantico',
+              line: lineNumber,
+              column,
+              message: `Tipo de retorno incompatible. Se esperaba ${currentFunctionReturn} y se obtuvo ${expressionType}.`,
+              suggestion: 'Devuelva una expresion compatible con el tipo declarado por la funcion.',
+              source: line,
+            });
+          }
+        }
+        return;
+      }
+
+      this.pushDiagnostic(diagnostics, {
+        severity: 'error',
+        stage: 'Sintactico',
+        line: lineNumber,
+        column,
+        message: `Instruccion no valida: ${line}`,
+        suggestion: this.suggestInstructionFix(line) ?? 'Revise la palabra reservada o la estructura de la instruccion.',
+        source: line,
+      });
+    });
+
+    for (const frame of blockStack.reverse()) {
+      this.pushDiagnostic(diagnostics, {
+        severity: 'error',
+        stage: 'Sintactico',
+        line: frame.line,
+        column: 1,
+        message: `Falta cerrar el bloque con "${frame.expected}".`,
+        suggestion: `Agregue ${frame.expected} para cerrar el bloque iniciado en esta linea.`,
+        source: lines[frame.line - 1]?.trim(),
+      });
+    }
+
+    return diagnostics.sort((left, right) => left.line - right.line || left.column - right.column);
+  }
+
+  private validateAssignment(
+    line: string,
+    rawLine: string,
+    lineNumber: number,
+    declarations: Map<string, { type: string; line: number; column: number }>,
+    functions: Map<string, { returnType: string; line: number; column: number; params: Array<{ name: string; dataType: string }> }>,
+    diagnostics: Diagnostic[],
+  ): void {
+    const match = line.match(/^([a-zA-Z][a-zA-Z0-9]*)\s*<-\s*(.+)$/);
+    const name = match?.[1];
+    const expression = match?.[2]?.trim();
+
+    if (!name || !expression) {
+      return;
+    }
+
+    const declaration = declarations.get(name);
+    if (!declaration) {
+      this.pushDiagnostic(diagnostics, {
+        severity: 'error',
+        stage: 'Semantico',
+        line: lineNumber,
+        column: rawLine.indexOf(name) + 1,
+        endColumn: rawLine.indexOf(name) + name.length + 1,
+        message: `Variable "${name}" no declarada.`,
+        suggestion: `Declare la variable antes de usarla: Definir ${name} Como Entero.`,
+        source: line,
+      });
+      return;
+    }
+
+    const expressionType = this.inferExpressionType(expression, declarations, functions, lineNumber, diagnostics);
+    if (expressionType && !this.isAssignable(declaration.type, expressionType)) {
+      this.pushDiagnostic(diagnostics, {
+        severity: 'error',
+        stage: 'Semantico',
+        line: lineNumber,
+        column: rawLine.indexOf(expression) + 1,
+        message: `Tipo incompatible. Se esperaba ${declaration.type} y se obtuvo ${expressionType}.`,
+        suggestion: 'Cambie el valor asignado o el tipo de la variable para que coincidan.',
+        source: line,
+      });
+    }
+  }
+
+  private inferExpressionType(
+    expression: string,
+    declarations: Map<string, { type: string; line: number; column: number }>,
+    functions: Map<string, { returnType: string; line: number; column: number; params: Array<{ name: string; dataType: string }> }>,
+    line: number,
+    diagnostics: Diagnostic[],
+  ): string | undefined {
+    const trimmed = expression.trim();
+
+    if (/^".*"$/.test(trimmed)) return 'Cadena';
+    if (/^(Verdadero|Falso)$/.test(trimmed)) return 'Logico';
+    if (/^\d+$/.test(trimmed)) return 'Entero';
+    if (/^\d+\.\d+$/.test(trimmed)) return 'Real';
+
+    const call = trimmed.match(/^([a-zA-Z][a-zA-Z0-9]*)\s*\((.*)\)$/);
+    if (call) {
+      const fn = functions.get(call[1]);
+      if (!fn) {
+        this.pushDiagnostic(diagnostics, {
+          severity: 'error',
+          stage: 'Semantico',
+          line,
+          column: 1,
+          message: `La funcion "${call[1]}" no existe.`,
+          suggestion: 'Declare la funcion antes de llamarla o corrija el nombre.',
+          source: trimmed,
+        });
+        return undefined;
+      }
+
+      const args = call[2].split(',').map((arg) => arg.trim()).filter(Boolean);
+      if (args.length !== fn.params.length) {
+        this.pushDiagnostic(diagnostics, {
+          severity: 'error',
+          stage: 'Semantico',
+          line,
+          column: 1,
+          message: `Cantidad invalida de argumentos para "${call[1]}".`,
+          suggestion: `La funcion espera ${fn.params.length} argumento(s).`,
+          source: trimmed,
+        });
+      }
+      return fn.returnType;
+    }
+
+    if (/^[a-zA-Z][a-zA-Z0-9]*$/.test(trimmed)) {
+      const declaration = declarations.get(trimmed);
+      if (!declaration) {
+        this.pushDiagnostic(diagnostics, {
+          severity: 'error',
+          stage: 'Semantico',
+          line,
+          column: 1,
+          message: `Variable "${trimmed}" no declarada.`,
+          suggestion: `Declare la variable antes de usarla: Definir ${trimmed} Como Entero.`,
+          source: trimmed,
+        });
+        return undefined;
+      }
+      return declaration.type;
+    }
+
+    const arithmeticParts = trimmed
+      .split(/(\+|-|\*|\/)/)
+      .map((part) => part.trim())
+      .filter((part) => part && !['+', '-', '*', '/'].includes(part));
+
+    if (arithmeticParts.length > 1) {
+      let result = 'Entero';
+      for (const part of arithmeticParts) {
+        const partType = this.inferExpressionType(part, declarations, functions, line, diagnostics);
+        if (partType === 'Real') result = 'Real';
+        if (partType && partType !== 'Entero' && partType !== 'Real') {
+          this.pushDiagnostic(diagnostics, {
+            severity: 'error',
+            stage: 'Semantico',
+            line,
+            column: 1,
+            message: `Operacion aritmetica invalida con tipo ${partType}.`,
+            suggestion: 'Use solo valores Entero o Real en operaciones aritmeticas.',
+            source: trimmed,
+          });
+        }
+      }
+      return result;
+    }
+
+    return undefined;
+  }
+
+  private closeBlock(
+    stack: BlockFrame[],
+    closer: string,
+    line: number,
+    column: number,
+    diagnostics: Diagnostic[],
+    source: string,
+  ): void {
+    const expectedByCloser: Record<string, BlockFrame['kind']> = {
+      FinSi: 'IF',
+      FinMientras: 'WHILE',
+      FinPara: 'FOR',
+      FinSegun: 'SWITCH',
+      FinFuncion: 'FUNCTION',
+      FinAlgoritmo: 'PROGRAM',
+    };
+    const expectedKind = expectedByCloser[closer];
+    const index = [...stack].reverse().findIndex((frame) => frame.kind === expectedKind);
+
+    if (index < 0) {
+      this.pushDiagnostic(diagnostics, {
+        severity: 'error',
+        stage: 'Sintactico',
+        line,
+        column,
+        message: `Cierre inesperado "${closer}".`,
+        suggestion: 'Elimine este cierre o agregue antes la estructura que corresponde.',
+        source,
+      });
+      return;
+    }
+
+    const stackIndex = stack.length - 1 - index;
+    stack.splice(stackIndex, 1);
+  }
+
+  private parseFunctionHeader(line: string): { name: string; returnType: string; params: Array<{ name: string; dataType: string }> } | null {
+    const match = line.match(/^Funcion\s+([a-zA-Z][a-zA-Z0-9]*)\s*\((.*)\)\s+Como\s+(Entero|Real|Cadena|Logico|Vacio)$/);
+    if (!match) {
+      return null;
+    }
+
+    const params = match[2]
+      .split(',')
+      .map((param) => param.trim())
+      .filter(Boolean)
+      .map((param) => {
+        const paramMatch = param.match(/^([a-zA-Z][a-zA-Z0-9]*)\s+Como\s+(Entero|Real|Cadena|Logico)$/);
+        return paramMatch ? { name: paramMatch[1], dataType: paramMatch[2] } : null;
+      })
+      .filter((param): param is { name: string; dataType: string } => Boolean(param));
+
+    return { name: match[1], returnType: match[3], params };
+  }
+
+  private buildRecoveredAst(code: string): ASTNode | undefined {
+    const lines = code.replace(/\r/g, '').split('\n');
+    const header = lines.find((line) => regex.lineaPrograma.test(line.trim()));
+    const name = header?.trim().match(/^Algoritmo\s+([a-zA-Z][a-zA-Z0-9]*)$/)?.[1] ?? 'Programa';
+
+    return {
+      type: 'PROGRAM',
+      name,
+      line: Math.max(1, lines.findIndex((line) => regex.lineaPrograma.test(line.trim())) + 1),
+      children: lines
+        .map((rawLine, index) => this.recoverNode(rawLine.trim(), index + 1))
+        .filter((node): node is ASTNode => Boolean(node)),
+    };
+  }
+
+  private recoverNode(line: string, lineNumber: number): ASTNode | null {
+    if (!line || regex.lineaPrograma.test(line) || regex.finPrograma.test(line)) return null;
+    const declaration = line.match(/^Definir\s+([a-zA-Z][a-zA-Z0-9]*)\s+Como\s+(Entero|Real|Cadena|Logico)$/);
+    if (declaration) return { type: 'DECLARATION', name: declaration[1], dataType: declaration[2], line: lineNumber };
+    const assignment = line.match(/^([a-zA-Z][a-zA-Z0-9]*)\s*<-\s*(.+)$/);
+    if (assignment) return { type: 'ASSIGNMENT', name: assignment[1], expression: assignment[2].trim(), line: lineNumber };
+    const print = line.match(/^Escribir\s+(.+)$/);
+    if (print) return { type: 'PRINT', expression: print[1].trim(), line: lineNumber };
+    const functionInfo = this.parseFunctionHeader(line);
+    if (functionInfo) return { type: 'FUNCTION', name: functionInfo.name, params: functionInfo.params, returnType: functionInfo.returnType, line: lineNumber, children: [] };
+    return { type: 'UNKNOWN', expression: line, line: lineNumber };
+  }
+
+  private buildSymbolTableFromSource(code: string): SymbolTableEntry[] {
+    const rows: SymbolTableEntry[] = [];
+    const lines = code.replace(/\r/g, '').split('\n');
+    const headerIndex = lines.findIndex((line) => regex.lineaPrograma.test(line.trim()));
+    const programName = headerIndex >= 0
+      ? lines[headerIndex].trim().match(/^Algoritmo\s+([a-zA-Z][a-zA-Z0-9]*)$/)?.[1]
+      : 'Programa';
+
+    rows.push({
+      nombre: programName ?? 'Programa',
+      categoria: 'programa',
+      tipo: 'Algoritmo',
+      ambito: 'global',
+      linea: headerIndex >= 0 ? headerIndex + 1 : 1,
+    });
+
+    let scope = programName ?? 'global';
+    lines.forEach((rawLine, index) => {
+      const line = rawLine.trim();
+      const declaration = line.match(/^Definir\s+([a-zA-Z][a-zA-Z0-9]*)\s+Como\s+(Entero|Real|Cadena|Logico)$/);
+      if (declaration) {
+        rows.push({ nombre: declaration[1], categoria: 'variable', tipo: declaration[2], ambito: scope, linea: index + 1 });
+      }
+
+      const functionInfo = this.parseFunctionHeader(line);
+      if (functionInfo) {
+        scope = functionInfo.name;
+        rows.push({ nombre: functionInfo.name, categoria: 'funcion', tipo: functionInfo.returnType, ambito: 'global', linea: index + 1 });
+        for (const param of functionInfo.params) {
+          rows.push({ nombre: param.name, categoria: 'parametro', tipo: param.dataType, ambito: functionInfo.name, linea: index + 1 });
+        }
+      }
+
+      if (line === 'FinFuncion') {
+        scope = programName ?? 'global';
+      }
+    });
+
+    return rows;
+  }
+
+  private errorToDiagnostic(message: string, stage: CompileStage, code: string): Diagnostic {
+    const line = this.extractErrorLine(message) ?? 1;
+    const source = code.replace(/\r/g, '').split('\n')[line - 1]?.trim();
+    return {
+      severity: 'error',
+      stage,
+      line,
+      column: 1,
+      message,
+      suggestion: this.buildSuggestion(message, stage),
+      source,
+    };
+  }
+
+  private mergeDiagnostics(diagnostics: Diagnostic[], fallback: Diagnostic): Diagnostic[] {
+    const exists = diagnostics.some((diagnostic) =>
+      diagnostic.line === fallback.line &&
+      (diagnostic.stage === fallback.stage || diagnostic.message === fallback.message),
+    );
+
+    return exists ? diagnostics : [...diagnostics, fallback];
+  }
+
+  private pushDiagnostic(diagnostics: Diagnostic[], diagnostic: Diagnostic): void {
+    const exists = diagnostics.some((item) =>
+      item.line === diagnostic.line &&
+      item.column === diagnostic.column &&
+      item.message === diagnostic.message,
+    );
+
+    if (!exists) {
+      diagnostics.push(diagnostic);
+    }
+  }
+
+  private isAssignable(expectedType: string, expressionType: string): boolean {
+    return expectedType === expressionType || (expectedType === 'Real' && expressionType === 'Entero');
   }
 
   private buildSymbolTable(ast: ReturnType<ParserService['parse']>): SymbolTableEntry[] {
